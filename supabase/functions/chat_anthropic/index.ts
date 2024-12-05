@@ -1,22 +1,10 @@
 import { createClient } from '@supabase/supabase-js';
-import { OpenAIStream, StreamingTextResponse } from 'ai';
 import { codeBlock } from 'common-tags';
-import OpenAI from 'openai';
+import Anthropic from '@anthropic-ai/sdk';
 import { Database } from '../_lib/database.ts';
-// You're an AI assistant who answers questions about documents.
 
-// You assist government employees with producing draft Requests for Proposals (RFPs).
-
-// You're only allowed to reference the capabilities contained in the documents below to formulate your RFP.
-
-// Your RFP must conform to the RFP Guidelines listed below.
-
-// Every draft RFP you generate must map the capabilities outlined in the documents below to a single Request for Proposal (RFP) provided by the user.
-
-// If the provided RFP's requirements cannot be mapped to capabilities available in the documents below, say:
-// "It looks like you're trying to build a RFP for a capability that isn't available in the documents provided."
-const openai = new OpenAI({
-  apiKey: Deno.env.get('OPENAI_API_KEY'),
+const ai = new Anthropic({
+  apiKey: Deno.env.get('ANTHROPIC_API_KEY'),
 });
 
 // These are automatically injected
@@ -26,34 +14,34 @@ const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY');
 export const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers':
-    'authorization, x-client-info, apikey, content-type',
+    'authorization, x-client-info, apikey, content-type, X-Api-Key',
 };
 
 Deno.serve(async (req) => {
   // Handle CORS
-  if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders });
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: corsHeaders });
   }
   if (!supabaseUrl || !supabaseAnonKey) {
     return new Response(
       JSON.stringify({
-        error: 'Missing environment variables.',
+        error: "Missing environment variables.",
       }),
       {
         status: 500,
-        headers: { 'Content-Type': 'application/json' },
+        headers: { "Content-Type": "application/json" },
       }
     );
   }
 
-  const authorization = req.headers.get('Authorization');
+  const authorization = req.headers.get("Authorization");
 
   if (!authorization) {
     return new Response(
       JSON.stringify({ error: `No authorization header passed` }),
       {
         status: 500,
-        headers: { 'Content-Type': 'application/json' },
+        headers: { "Content-Type": "application/json" },
       }
     );
   }
@@ -72,11 +60,11 @@ Deno.serve(async (req) => {
   const { messages, embedding } = await req.json();
 
   const { data: documents, error: matchError } = await supabase
-    .rpc('match_document_sections', {
+    .rpc("match_document_sections", {
       embedding,
       match_threshold: 0.8,
     })
-    .select('content')
+    .select("content")
     .limit(5);
 
   if (matchError) {
@@ -84,27 +72,29 @@ Deno.serve(async (req) => {
 
     return new Response(
       JSON.stringify({
-        error: 'There was an error reading your documents, please try again.',
+        error: "There was an error reading your documents, please try again.",
       }),
       {
         status: 500,
-        headers: { 'Content-Type': 'application/json' },
+        headers: { "Content-Type": "application/json" },
       }
     );
   }
 
   const injectedDocs =
     documents && documents.length > 0
-      ? documents.map(({ content }) => content).join('\n\n')
-      : 'No documents found';
+      ? documents.map(({ content }) => content).join("\n\n")
+      : "No documents found";
 
   console.log(injectedDocs);
 
-  const completionMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] =
-    [
-      {
-        role: 'user',
-        content: codeBlock`
+  const completionMessages = [
+    {
+      role: "user",
+      stream: true,
+      model: "claude-3-sonnet-20240229",
+      max_tokens: 1024,
+      content: codeBlock`
         You're an AI assistant who answers questions about documents.
 
         You're a chat bot, so keep your replies succinct.
@@ -122,18 +112,18 @@ Deno.serve(async (req) => {
         Documents:
         ${injectedDocs}
       `,
-      },
-      ...messages,
-    ];
+    },
+    ...messages,
+  ];
 
-  const completionStream = await openai.chat.completions.create({
-    model: 'gpt-4o-mini',
+  const completion = await ai.messages.create({
+    model: "claude-3-sonnet-20240229",
     messages: completionMessages,
     max_tokens: 1024,
     temperature: 0,
-    stream: true,
   });
 
-  const stream = OpenAIStream(completionStream);
-  return new StreamingTextResponse(stream, { headers: corsHeaders });
+  return new Response( completion.content.toString() , {
+    headers: { "Content-Type": "application/json" },
+  });
 });

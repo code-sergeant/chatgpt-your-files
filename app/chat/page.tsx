@@ -71,13 +71,13 @@ export default function ChatPage() {
               pooling: 'mean',
               normalize: true,
             });
-
+            console.log(output);
             const embedding = JSON.stringify(Array.from(output.data));
-
+            console.log(embedding);
             const {
               data: { session },
             } = await supabase.auth.getSession();
-
+              console.log(session);
             if (!session) {
               return;
             }
